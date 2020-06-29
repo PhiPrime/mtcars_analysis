@@ -1,0 +1,134 @@
+---
+title: "An Analysis of MPG in Relation to Transmission Type"
+author: "Luke Coughlin"
+geometry: "top=1cm"
+fontsize: 10pt
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include = FALSE)
+```
+
+## Executive Summary  
+In this report we look to understand if an automatic or manual transmission is better for MPG from a sample of 32 vehicles from the *1974 Motor Trend* US magazine. From these data we found that, when accounting for weight, using a manual transmission rather than automatic does not have statistically significant enough results to state that the miles per gallon (MPG) is increased.  **[The code for producing the report can be found on GitHub](https://github.com/PhiPrime/mtcars_analysis)**  
+
+### Load Data  
+We'll be using the `mtcars` data to perform this analysis.  
+```{r Load_Data, echo = FALSE}
+library(datasets)  
+data(mtcars)
+```
+
+### Exploratory Analysis  
+Some things that may be a cofactor for `mpg` are number of cylinders (`cyl`), weight(`wt`), engine type(`vs`), number of forward gears(`gear`), and number of carburetors(`carb`). We'll be looking at how these effect MPG and accounting for the appropriate ones before we look at how the transmission type effects MPG as to eliminate any cofactors. Figure 1 shows all the linear models of these five variables.    
+```{r Cofactor_Plots, echo = FALSE, results = 'hide'}
+cocols <- c(2,6,8,10,11)
+rsqs <- rep(NA, length(cocols))
+counter <- 1
+par(mfrow = c(2, 3))
+for (i in cocols){
+        linm <- lm(mpg ~ mtcars[,i], data = mtcars)
+        rsqs[counter] <- summary(linm)$r.squared
+        counter <- counter + 1
+        plot(mtcars[,i], mtcars$mpg, xlab = names(mtcars)[i], ylab = "MPG")
+        abline(linm, col = "#FF0000", lwd = 3)
+}
+res <- data.frame(var = names(mtcars)[cocols], col = cocols, r.squared = rsqs)
+order <- order(res$r.squared, decreasing = TRUE)
+res <- res[order,]
+```
+
+```{r Calc_Fits, echo = FALSE, include= TRUE}
+fit <- lm(mpg ~ am, data = mtcars)
+fit1 <- lm(mpg ~ am + wt, data = mtcars)
+fit2 <- lm(mpg ~ am + wt + cyl, data = mtcars)
+fit3 <- lm(mpg ~ am + wt + cyl + vs, data = mtcars)
+fit4 <- lm(mpg ~ am + wt + cyl + vs + carb, data = mtcars)
+fit5 <- lm(mpg ~ am + wt + cyl + vs + carb + gear, data = mtcars)
+anova(fit, fit1, fit2, fit3, fit4, fit5)
+```
+After seeing the probability of the weight affecting the variance in MPG we've decided to account for this while considering how the transmission type affects a car.  
+
+### Analysis  
+```{r wt_fits, echo = FALSE, include= TRUE}
+fit <- lm(mpg ~ am + wt, data = mtcars)
+logfit <- lm(mpg ~ am + I(log(wt)), data = mtcars)
+intfit <- lm(mpg ~ I(log(wt))*am, data = mtcars)
+summary(fit)$coef
+summary(logfit)$coef
+summary(intfit)$coef
+```
+By looking at the coefficients it seems taking the log of weight explains the variation in MPG better than the unadjusted weight. Although doing this will lose some interpretability, we feel it's worth it as to better evaluate how transmission affects MPG. We'll be using the model with an interaction variable to fit a model for each transmission type separately.
+
+```{r log_wt_plot, echo = FALSE}
+lwtfit <- lm(mpg~log(wt), data = mtcars)
+with(mtcars, plot(log(wt), mpg, col = as.factor(am), pch = 19))
+abline(lwtfit, col = "#5BC2E7", lwd = 2)
+manualcoefs <- data.frame(int = coef(intfit)[1], 
+                          slope = coef(intfit)[2])
+autocoefs <- data.frame(int = coef(intfit)[1] + coef(intfit)[3], 
+                        slope = coef(intfit)[2] + coef(intfit)[4])
+intercept <- (autocoefs$int - manualcoefs$int)/
+        (manualcoefs$slope - autocoefs$slope)
+abline(manualcoefs$int, manualcoefs$slope, col = "#000000", lwd = 2)
+abline(autocoefs$int, autocoefs$slope, col = "#FF0000", lwd = 2)
+legend("bottomleft", legend = c("Manual", "Automatic", "Both"), 
+       col = c("#000000", "#FF0000", "#5BC2E7"), 
+       pch = c(19, 19, NA), lty = 1)
+```
+  
+In figure 2, the blue line is the predicted value for MPG given the log of a weight. The red line is the predicted value for MPG of automatic transmissions, and the black line is for manual transmissions. It can be seen that lower weights have better MPG in automatic cars, and manual cars have better MPG at larger weights. The predicted value of manual cars has better MPG after the x value of `r round(intercept, 2)`, which is approximately `r round(1000 * exp(intercept))` pounds.  
+
+  
+
+```{r resid_plots, echo = FALSE}
+autofit <- lm(mpg ~ I(log(wt)), data = mtcars[mtcars$am == 1,])
+manfit <- lm(mpg ~ I(log(wt)), data = mtcars[mtcars$am == 0,])
+```
+
+```{r fig3}
+par(mfrow = c(2,2))
+plot(logfit)
+```
+```{r fig4}
+par(mfrow = c(2,2))
+plot(autofit, col = "#FF0000")
+```
+```{r fig5}
+par(mfrow = c(2,2))
+plot(manfit)
+```
+
+We'll now address the residual diagnostics of these three models with figures 3-5. It can be seen in the Normal Q-Q plot for the residuals of the model that ignores transmission type (fig. 3) that values stray from normality between theoretical quantiles 1 and 2. When fitting for automatic transmissions (fig. 4) this normality holds at larger values. When looking at manual transmissions (fig. 5) it can be seen that the `Toyota Corolla` and `Fiat 128` stray greatly from the model, it can be seen in the "Residuals vs Leverage" plot that these two vehicles have a good amount of leverage, but not enough to consider them outliers. The `Lotus Europa` also holds some leverage, but again, not enough to consider it an outlier.  
+
+### Results  
+```{r confint, echo = FALSE}
+res <- confint(intfit)
+```
+
+If weight were to be held constant changing from an automatic transmission to a manual would change one's MPG by `r round(res[3,1], 2)` to `r round(res[3,2], 2)` with 95% confidence. Since 0 is included in this interval we can not definitely state that a manual transmission will increase one's MPG when weight is held constant. 
+
+
+## Appendix  
+**Figure 1** - Possible Cofactors for MPG  
+```{r Fig_1, ref.label = "Cofactor_Plots", include = TRUE}
+```
+
+**Figure 2** - Linear Fits of log(wt) With and Without Considering Transmission Type  
+```{r Fig_2, ref.label = "log_wt_plot", include = TRUE}
+```
+
+**Figure 3** - Residual Diagnostics Disregarding Transmission Type  
+```{r Fig_3, ref.label = "fig3", include = TRUE}
+```
+
+**Figure 4** - Residual Diagnostics for Automatic Transmissions  
+```{r Fig_4, ref.label = "fig4", include = TRUE}
+```
+
+**Figure 5** - Residual Diagnostics for Manual Transmissions  
+```{r Fig_5, ref.label = "fig5", include = TRUE}
+```
+
+
